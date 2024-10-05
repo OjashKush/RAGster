@@ -1,173 +1,52 @@
 import os
-import re
-import hashlib
-import logging 
-from typing import List, Dict
+import logging
+from typing import List, Dict, Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
-from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from sentence_transformers import SentenceTransformer
 from langchain_community.vectorstores import Pinecone as LangchainPinecone
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.llms import HuggingFaceHub
 from langchain.chains import RetrievalQA
 from pinecone import Pinecone
 import requests
-import aiohttp
-import base64
 import time
 import json
-import streamlit as st
+from dotenv import load_dotenv
 
-# Load environment variables
+# Load environment variables from .env file
 load_dotenv()
 
+# Configuration
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
+INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "ht")
+HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN")
+SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
+
+# Validate required environment variables
+required_env_vars = ["PINECONE_API_KEY", "PINECONE_ENVIRONMENT", "HUGGINGFACE_API_TOKEN", "SARVAM_API_KEY"]
+missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+if missing_vars:
+    raise EnvironmentError(f"Missing required environment variables: {', '.join(missing_vars)}")
+
+# Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Configuration using Streamlit secrets
-PINECONE_API_KEY = st.secrets["api_keys"]["PINECONE_API_KEY"]
-PINECONE_ENVIRONMENT = st.secrets["api_keys"]["PINECONE_ENVIRONMENT"]
-INDEX_NAME = "ht"
-HUGGINGFACE_API_TOKEN = st.secrets["api_keys"]["HUGGINGFACE_API_TOKEN"]
-SARVAM_API_KEY = st.secrets["api_keys"]["SARVAM_API_KEY"]
+app = FastAPI()
 
-# Set environment variables
-os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
-os.environ["PINECONE_ENVIRONMENT"] = PINECONE_ENVIRONMENT
-os.environ["HUGGINGFACEHUB_API_TOKEN"] = HUGGINGFACE_API_TOKEN
-
-def extract_text_from_pdf(pdf_path: str) -> str:
-    with open(pdf_path, 'rb') as file:
-        pdf = PdfReader(file)
-        return ''.join(page.extract_text() for page in pdf.pages)
-
-def process_pdfs(file_or_directory: str) -> List[str]:
-    texts = []
-    if os.path.isfile(file_or_directory) and file_or_directory.endswith('.pdf'):
-        texts.append(extract_text_from_pdf(file_or_directory))
-    elif os.path.isdir(file_or_directory):
-        for filename in os.listdir(file_or_directory):
-            if filename.endswith('.pdf'):
-                file_path = os.path.join(file_or_directory, filename)
-                texts.append(extract_text_from_pdf(file_path))
-    else:
-        raise FileNotFoundError(f"No such file or directory: '{file_or_directory}'")
-    return texts
-
-def split_texts(texts: List[str]) -> List[str]:
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50,
-        length_function=len
-    )
-    return [chunk for text in texts for chunk in text_splitter.split_text(text)]
-
-class SentenceTransformerEmbeddings(HuggingFaceEmbeddings):
-    def __init__(self, model_name='sentence-transformers/all-MiniLM-L6-v2'):
-        self.model = SentenceTransformer(model_name)
-
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        return self.model.encode(texts)
-
-    def embed_query(self, text: str) -> List[float]:
-        return self.model.encode(text)
-
-def index_documents(chunks: List[str], embeddings: HuggingFaceEmbeddings):
-    pc = Pinecone(api_key=PINECONE_API_KEY)
-    index = pc.Index(INDEX_NAME)
-    
-    for chunk in chunks:
-        embedding = embeddings.embed_query(chunk)
-        metadata = {"text": chunk}
-        id = hashlib.md5(chunk.encode()).hexdigest()
-        index.upsert(vectors=[{"id": id, "values": embedding, "metadata": metadata}])
-
-def setup_rag_chain():
-    # Change the embedding model to match the index dimension (384)
-    embeddings = HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2')
-    vectorstore = LangchainPinecone.from_existing_index(
-        index_name=INDEX_NAME,
-        embedding=embeddings,
-        text_key="text"
-    )
-    llm = HuggingFaceHub(repo_id="microsoft/Phi-3-mini-4k-instruct")
-    return RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=vectorstore.as_retriever(),
-        return_source_documents=True
-    )
-
-def query_rag(rag_chain, question: str) -> Dict[str, str]:
-    logger.debug(f"Querying RAG with: {question}")
-    try:
-        response = rag_chain({"query": question})
-        logger.debug(f"RAG response: {response}")
-        
-        if 'result' not in response or 'source_documents' not in response:
-            logger.error(f"Unexpected RAG response structure: {response}")
-            raise ValueError("Unexpected RAG response structure")
-
-        if response['result'].strip().startswith("Use the following pieces of context"):
-            logger.error(f"RAG returned default prompt: {response['result']}")
-            raise ValueError("RAG returned default prompt")
-
-        return {
-            "answer": response['result'],
-            "sources": [doc.page_content for doc in response['source_documents']]
-        }
-    except Exception as e:
-        logger.error(f"Error in RAG query: {str(e)}")
-        return {
-            "answer": f"An error occurred: {str(e)}. Please try again or contact support.",
-            "sources": []
-        }
-    
+class Query(BaseModel):
+    question: str
 
 class StandardRAG:
     def __init__(self, rag_chain):
         self.rag_chain = rag_chain
-        self.greeting_patterns = [
-            r"^(hello|hi|hey|good\s+(morning|afternoon|evening))",
-            r"^how are you",
-            r"^what's up",
-        ]
         logger.debug("Standard RAG initialized")
 
-    def is_greeting(self, query: str) -> bool:
-        query = query.lower().strip()
-        logger.debug(f"Checking if '{query}' is a greeting")
-    
-        for pattern in self.greeting_patterns:
-            if re.match(pattern, query):
-                logger.debug(f"Matched greeting pattern: {pattern}")
-                return True
-    
-        logger.debug("Not a greeting")
-        return False
-
-    def generate_greeting_response(self, query: str) -> str:
-        logger.debug(f"Generating greeting response for: {query}")
-        if re.match(r"^how are you", query.lower()):
-            return "I'm doing well, thank you for asking! How can I assist you today?"
-        elif re.match(r"^what's up", query.lower()):
-            return "Not much, just here to help! What can I do for you?"
-        else:
-            return "Hello! How can I assist you today?"
-
-    def process_query(self, query: str) -> Dict[str, any]:
+    def process_query(self, query: str) -> Dict[str, Any]:
         logger.debug(f"StandardRAG processing query: {query}")
-        
-        # Check if the query is a greeting
-        if self.is_greeting(query):
-            response = self.generate_greeting_response(query)
-            logger.debug(f"Greeting response generated: {response}")
-            return {"answer": response, "sources": []}
-        
-        # Proceed with querying RAG for non-greetings
         try:
             response = self.rag_chain({"query": query})
             answer = response['result'].split("Helpful Answer:")[-1].strip()
@@ -185,69 +64,23 @@ class StandardRAG:
 class ReflectiveAgent:
     def __init__(self, rag_chain):
         self.rag_chain = rag_chain
-        self.greeting_patterns = [
-            r"^(hello|hi|hey|good\s+(morning|afternoon|evening))",
-            r"^how are you",
-            r"^what's up",
-        ]
-        logger.debug("Agent initialized")
+        logger.debug("Reflective Agent initialized")
 
-    def is_greeting(self, query: str) -> bool:
-        query = query.lower().strip()
-        logger.debug(f"Checking if '{query}' is a greeting")
-    
-        for pattern in self.greeting_patterns:
-            if re.match(pattern, query):
-                logger.debug(f"Matched greeting pattern: {pattern}")
-                return True
-    
-        logger.debug("Not a greeting")
-        return False
-
-    def generate_greeting_response(self, query: str) -> str:
-        logger.debug(f"Generating greeting response for: {query}")
-        if re.match(r"^how are you", query.lower()):
-            return "I'm doing well, thank you for asking! How can I assist you today?"
-        elif re.match(r"^what's up", query.lower()):
-            return "Not much, just here to help! What can I do for you?"
-        else:
-            return "Hello! How can I assist you today?"
-
-    def process_query(self, query: str) -> Dict[str, any]:
-        logger.debug(f"Agent processing query: {query}")
-
-        if self.is_greeting(query):
-            response = self.generate_greeting_response(query)
-            logger.debug(f"Greeting response generated: {response}")
-            return {"answer": response, "sources": []}  # No reflection needed for greetings
-        else:
-            logger.debug("Not a greeting, querying RAG")
-            return self.query_rag_with_reflection(query)  # Call reflection query
-
-    def query_rag_with_reflection(self, query: str) -> Dict[str, any]:
+    def process_query(self, query: str) -> Dict[str, Any]:
+        logger.debug(f"ReflectiveAgent processing query: {query}")
         try:
             initial_response = self.rag_chain({"query": query})
             initial_answer = initial_response['result'].split("Helpful Answer:")[-1].strip()
 
-            # Only reflect if the initial answer isn't a greeting
-            if not self.is_greeting(initial_answer):  # Check if the response is a greeting
-                reflection_prompt = f"Reflect on and improve this answer: '{initial_answer}'"
-                improved_response = self.rag_chain({"query": reflection_prompt})
-                improved_answer = improved_response['result'].split("Helpful Answer:")[-1].strip()
+            reflection_prompt = f"Reflect on and improve this answer: '{initial_answer}'"
+            improved_response = self.rag_chain({"query": reflection_prompt})
+            improved_answer = improved_response['result'].split("Helpful Answer:")[-1].strip()
 
-                return {
-                    "answer": improved_answer,
-                    "sources": [doc.page_content[:100] + "..." for doc in initial_response['source_documents']],
-                    "reflection": "This answer has been refined through self-reflection."
-                }
-            else:
-                # If the initial answer is a greeting, just return it
-                return {
-                    "answer": initial_answer,
-                    "sources": [doc.page_content[:100] + "..." for doc in initial_response['source_documents']],
-                    "reflection": None
-                }
-
+            return {
+                "answer": improved_answer,
+                "sources": [doc.page_content[:100] + "..." for doc in initial_response['source_documents']],
+                "reflection": "This answer has been refined through self-reflection."
+            }
         except Exception as e:
             logger.error(f"Error in ReflectiveAgent query: {str(e)}")
             return {
@@ -256,47 +89,33 @@ class ReflectiveAgent:
                 "reflection": "An error occurred during the reflection process."
             }
 
-def compare_rag_methods(query: str, standard_rag: StandardRAG, agentic_rag: ReflectiveAgent) -> Dict[str, Dict[str, str]]:
-    logger.debug(f"Comparing RAG methods for query: {query}")
-    
-    # Measure time for Standard RAG
-    start_time = time.time()
-    standard_response = standard_rag.process_query(query)
-    standard_time = time.time() - start_time
-
-    # Measure time for Agentic RAG
-    start_time = time.time()
-    agentic_response = agentic_rag.process_query(query)
-    agentic_time = time.time() - start_time
-
-    return {
-        "standard_rag": {
-            "response": standard_response,
-            "time": standard_time
-        },
-        "agentic_rag": {
-            "response": agentic_response,
-            "time": agentic_time
-        }
-    }
-
-app = FastAPI()
-
-class Query(BaseModel):
-    question: str
+def setup_rag_chain():
+    embeddings = HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2')
+    vectorstore = LangchainPinecone.from_existing_index(
+        index_name=INDEX_NAME,
+        embedding=embeddings,
+        text_key="text"
+    )
+    llm = HuggingFaceHub(
+        repo_id="microsoft/Phi-3-mini-4k-instruct",
+        huggingfacehub_api_token=HUGGINGFACE_API_TOKEN
+    )
+    return RetrievalQA.from_chain_type(
+        llm=llm,
+        chain_type="stuff",
+        retriever=vectorstore.as_retriever(),
+        return_source_documents=True
+    )
 
 # Global variables
 rag_chain = None
 standard_rag = None
 reflective_agent = None
-MAX_TEXT_LENGTH = 500
 
 @app.on_event("startup")
 async def startup_event():
     global rag_chain, standard_rag, reflective_agent
     try:
-        # ... (keep the existing startup logic)
-
         # Setup RAG chain
         rag_chain = setup_rag_chain()
         logger.info("RAG chain created")
@@ -338,8 +157,30 @@ async def rag_query(query: Query):
     
     return comparison_results
 
+def compare_rag_methods(query: str, standard_rag: StandardRAG, agentic_rag: ReflectiveAgent) -> Dict[str, Dict[str, Any]]:
+    logger.debug(f"Comparing RAG methods for query: {query}")
+    
+    # Measure time for Standard RAG
+    start_time = time.time()
+    standard_response = standard_rag.process_query(query)
+    standard_time = time.time() - start_time
 
-@app.post("/text-to-speech")
+    # Measure time for Agentic RAG
+    start_time = time.time()
+    agentic_response = agentic_rag.process_query(query)
+    agentic_time = time.time() - start_time
+
+    return {
+        "standard_rag": {
+            "response": standard_response,
+            "time": standard_time
+        },
+        "agentic_rag": {
+            "response": agentic_response,
+            "time": agentic_time
+        }
+    }
+
 async def text_to_speech(text: str):
     url = "https://api.sarvam.ai/text-to-speech"
 
