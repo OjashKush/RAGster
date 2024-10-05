@@ -55,14 +55,14 @@ This application processes PDF documents, extracts and indexes text for efficien
 ### Reflective Agent
 - This agent performs an additional step of self-reflection. After generating an initial response, it reflects on the answer to refine and improve it.
 - Reflection is inspired by research papers:
-  - **Self-Refine**: Iterative Refinement with Self-Feedback (Madaan et al., 2023) [1] https://www.researchgate.net/publication/369740347_Self-Refine_Iterative_Refinement_with_Self-Feedback
-  - **Reflexion**: Language Agents with Verbal Reinforcement Learning (Shinn et al., 2023). [2] https://arxiv.org/abs/2303.11366
+  - **Self-Refine**: Iterative Refinement with Self-Feedback (Madaan et al., 2023) ![1](https://www.researchgate.net/publication/369740347_Self-Refine_Iterative_Refinement_with_Self-Feedback)
+  - **Reflexion**: Language Agents with Verbal Reinforcement Learning (Shinn et al., 2023). ![2](https://arxiv.org/abs/2303.11366)
 
 ## Images of Streamlit App
 
-Main Interface[1] ![main](https://github.com/OjashKush/RAGster/blob/main/ragstermain.jpeg)
+Main Interface ![main](https://github.com/OjashKush/RAGster/blob/main/Screenshot_2024-10-05_19-31-36.png)
 
-Audio Generation[2] ![audio](https://github.com/OjashKush/RAGster/blob/main/ragsteraudio.jpeg)
+Audio Generation ![audio](https://github.com/OjashKush/RAGster/blob/main/Screenshot_2024-10-05_19-31-14.png)
 
 Images of the app interface are available for demonstration purposes.
 
@@ -79,14 +79,9 @@ pip install -r requirements.txt
 
 ### Running the App
 
-1. **Start the FastAPI server:**
+1. **Launch the Streamlit Frontend:**
    ```bash
-   uvicorn app:app --reload
-   ```
-
-2. **Launch the Streamlit Frontend:**
-   ```bash
-   streamlit run streamlit_app.py
+   streamlit run app.py
    ```
 
 Enjoy exploring your PDF documents with advanced question answering capabilities!
