@@ -60,9 +60,9 @@ This application processes PDF documents, extracts and indexes text for efficien
 
 ## Images of Streamlit App
 
-Main Interface[1] https://github.com/OjashKush/RAGster/blob/main/ragstermain.jpeg
+Main Interface[1] ![main](https://github.com/OjashKush/RAGster/blob/main/ragstermain.jpeg)
 
-Audio Generation[2] https://github.com/OjashKush/RAGster/blob/main/ragsteraudio.jpeg
+Audio Generation[2] ![audio](https://github.com/OjashKush/RAGster/blob/main/ragsteraudio.jpeg)
 
 Images of the app interface are available for demonstration purposes.
 
