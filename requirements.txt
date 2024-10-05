@@ -10,3 +10,4 @@ langchain_community
 langchain_huggingface
 pinecone-client
 aiohttp
+nest_asyncio
