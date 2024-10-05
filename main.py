@@ -19,7 +19,7 @@ import aiohttp
 import base64
 import time
 import json
-from dotenv import load_dotenv
+import streamlit as st
 
 # Load environment variables
 load_dotenv()
@@ -27,12 +27,12 @@ load_dotenv()
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Configuration
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
+# Configuration using Streamlit secrets
+PINECONE_API_KEY = st.secrets["api_keys"]["PINECONE_API_KEY"]
+PINECONE_ENVIRONMENT = st.secrets["api_keys"]["PINECONE_ENVIRONMENT"]
 INDEX_NAME = "ht"
-HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN")
-SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
+HUGGINGFACE_API_TOKEN = st.secrets["api_keys"]["HUGGINGFACE_API_TOKEN"]
+SARVAM_API_KEY = st.secrets["api_keys"]["SARVAM_API_KEY"]
 
 # Set environment variables
 os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
