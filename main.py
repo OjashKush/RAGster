@@ -14,6 +14,7 @@ import requests
 import time
 import json
 from dotenv import load_dotenv
+import re
 
 # Load environment variables from .env file
 load_dotenv()
@@ -43,11 +44,56 @@ class Query(BaseModel):
 class StandardRAG:
     def __init__(self, rag_chain):
         self.rag_chain = rag_chain
+        self.greeting_patterns = [
+            r"^(hello|hi|hey|good\s+(morning|afternoon|evening))",
+            r"^how are you",
+            r"^what's up",
+            r"^greetings",
+            r"^hola",
+            r"^namaste"
+        ]
         logger.debug("Standard RAG initialized")
 
+    def is_greeting(self, query: str) -> bool:
+        query = query.lower().strip()
+        for pattern in self.greeting_patterns:
+            if re.match(pattern, query, re.IGNORECASE):
+                return True
+        return False
+
+    def generate_greeting_response(self, query: str) -> Dict[str, Any]:
+        query = query.lower().strip()
+        if re.match(r"^how are you", query):
+            return {
+                "answer": "I'm doing well, thank you for asking! How can I assist you today?",
+                "sources": []
+            }
+        elif re.match(r"^what's up", query):
+            return {
+                "answer": "Not much, just here to help! What can I do for you?",
+                "sources": []
+            }
+        elif re.match(r"^good\s+(morning|afternoon|evening)", query):
+            time_of_day = re.search(r"(morning|afternoon|evening)", query).group(1)
+            return {
+                "answer": f"Good {time_of_day}! How may I assist you today?",
+                "sources": []
+            }
+        else:
+            return {
+                "answer": "Hello! How can I assist you today?",
+                "sources": []
+            }
+
     def process_query(self, query: str) -> Dict[str, Any]:
-        logger.debug(f"StandardRAG processing query: {query}")
+        logger.debug(f"Processing query: {query}")
+        
+        if self.is_greeting(query):
+            logger.debug("Greeting detected, generating greeting response")
+            return self.generate_greeting_response(query)
+        
         try:
+            logger.debug("Processing non-greeting query through RAG chain")
             response = self.rag_chain({"query": query})
             answer = response['result'].split("Helpful Answer:")[-1].strip()
             return {
@@ -64,18 +110,77 @@ class StandardRAG:
 class ReflectiveAgent:
     def __init__(self, rag_chain):
         self.rag_chain = rag_chain
+        self.greeting_patterns = [
+            r"^(hello|hi|hey|good\s+(morning|afternoon|evening))",
+            r"^how are you",
+            r"^what's up",
+            r"^greetings",
+            r"^hola",
+            r"^namaste"
+        ]
         logger.debug("Reflective Agent initialized")
 
+    def is_greeting(self, query: str) -> bool:
+        query = query.lower().strip()
+        logger.debug(f"Checking if '{query}' is a greeting")
+        
+        for pattern in self.greeting_patterns:
+            if re.match(pattern, query, re.IGNORECASE):
+                logger.debug(f"Matched greeting pattern: {pattern}")
+                return True
+        
+        logger.debug("Not a greeting")
+        return False
+
+    def generate_greeting_response(self, query: str) -> Dict[str, Any]:
+        query = query.lower().strip()
+        logger.debug(f"Generating greeting response for: {query}")
+        
+        if re.match(r"^how are you", query):
+            response = {
+                "answer": "I'm doing well, thank you for asking! I'm here to help with more thoughtful and reflective answers. What can I assist you with?",
+                "sources": [],
+                "reflection": "Greeting acknowledged with a focus on highlighting reflective capabilities"
+            }
+        elif re.match(r"^what's up", query):
+            response = {
+                "answer": "I'm here and ready to help with careful, reflective responses! What would you like to explore?",
+                "sources": [],
+                "reflection": "Casual greeting acknowledged while maintaining professional tone"
+            }
+        elif re.match(r"^good\s+(morning|afternoon|evening)", query):
+            time_of_day = re.search(r"(morning|afternoon|evening)", query).group(1)
+            response = {
+                "answer": f"Good {time_of_day}! I'm ready to provide thoughtful assistance with your questions.",
+                "sources": [],
+                "reflection": "Time-appropriate greeting with emphasis on analytical approach"
+            }
+        else:
+            response = {
+                "answer": "Hello! I'm ready to help with careful, reflective answers to your questions.",
+                "sources": [],
+                "reflection": "Standard greeting with focus on analytical capabilities"
+            }
+        
+        logger.debug(f"Generated greeting response: {response}")
+        return response
+
     def process_query(self, query: str) -> Dict[str, Any]:
-        logger.debug(f"ReflectiveAgent processing query: {query}")
+        logger.debug(f"Agent processing query: {query}")
+        
+        if self.is_greeting(query):
+            logger.debug("Greeting detected, generating reflective greeting response")
+            return self.generate_greeting_response(query)
+        
         try:
+            logger.debug("Processing non-greeting query with reflection")
             initial_response = self.rag_chain({"query": query})
             initial_answer = initial_response['result'].split("Helpful Answer:")[-1].strip()
-
+            
             reflection_prompt = f"Reflect on and improve this answer: '{initial_answer}'"
             improved_response = self.rag_chain({"query": reflection_prompt})
             improved_answer = improved_response['result'].split("Helpful Answer:")[-1].strip()
-
+            
             return {
                 "answer": improved_answer,
                 "sources": [doc.page_content[:100] + "..." for doc in initial_response['source_documents']],
